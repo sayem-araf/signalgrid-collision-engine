@@ -1,0 +1,4 @@
+# Dashboard. The engine, extractor and rundemo.py use the standard library only.
+streamlit>=1.40
+pandas
+plotly

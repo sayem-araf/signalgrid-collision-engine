@@ -49,17 +49,18 @@ BOM and ERP export."; plus a "Reset demo" button that clears all decisions and t
   tooltip "Demo proxy. In a pilot, relay count comes from bay/feeder count in tender documents."
 - partsPerRelay 8 (1–16) "Critical parts per relay"
 - lineCapacity 140 (50–300, step 10) "Assembly line capacity (relays/week)"
-- committedPct 85 (50–95, step 5) "Capacity already committed (%)"
+- committedPct 85 (50–100, step 5) "Capacity already committed (%)"
 - testDeliveryWeeks 3 (1–8) "Test + delivery after assembly (weeks)"
 - baseLeadTime 14 (6–26) "Normal component lead time (weeks)"
-- erpFlagWeek 14 (6–24) "Week a delay normally shows in ERP", tooltip "When a purchase order misses its
-  confirmed date."
+- erpFlagWeek 14 (6–24) "Assumed week a delay shows in ERP today", tooltip "Assumption, not measured: when a
+  purchase order would miss its confirmed date in today's process. Used only for comparison."
 
 LOGIC (implement exactly; all weeks are "weeks from today")
 relays           = Math.max(0, Math.round(mw * relaysPerMW * (1 + stressPct / 100)))
 parts            = relays * partsPerRelay
-freeCap          = Math.max(1, Math.round(lineCapacity * (1 - committedPct / 100)))
-assemblyWeeks    = relays > 0 ? Math.ceil(relays / freeCap) : 0
+freeCap          = Math.max(0, Math.round(lineCapacity * (1 - committedPct / 100)))
+capacityFeasible = freeCap > 0 || relays === 0
+assemblyWeeks    = relays > 0 && freeCap > 0 ? Math.ceil(relays / freeCap) : 0
 partsNeededWeek  = needWeek - testDeliveryWeeks - assemblyWeeks
 base             = baseLeadTime + policyDelay
 arrivalBest      = base + delayBest
@@ -69,7 +70,14 @@ gapX             = Math.max(0, arrivalX - partsNeededWeek)        (for Best, Lik
 arrivalIfBuffer  = base          (assumption, illustrative: ordering the buffer now, before allocation
                                   tightens, avoids the supplier delay)
 latestOrderWeek  = partsNeededWeek - arrivalIfBuffer   (last week to order and still close the gap)
-severity = gapLikely > 8 ? "Escalate" : gapLikely > 2 ? "Act" : gapWorst > 0 ? "Watch" : "None"
+gapWithBuffer    = Math.max(0, arrivalIfBuffer - partsNeededWeek)
+Input check: delayBest <= delayLikely <= delayWorst and all >= 0, otherwise show an error instead of results.
+bufferClosesGap  = gapWithBuffer === 0
+severity = !capacityFeasible ? "Escalate"
+         : gapLikely > 8 ? "Escalate"
+         : gapLikely > 0 ? "Act"          (ANY positive likely gap requires action)
+         : gapWorst > 0 ? "Watch"         (Watch always means gapLikely is 0)
+         : "None"
 collides = severity is "Act" or "Escalate"
 
 SCENARIOS (tabs; all values illustrative)
@@ -122,19 +130,23 @@ market. Caption: "Language model output structured into a fixed schema. Cached f
 
 KPI TILES
 stressNote = stressPct > 0 ? " · +{stressPct}% stress" : ""
-1. Collision gap
+1. Collision gap (the value always shows the computed gapLikely; never hardcode it)
+   - !capacityFeasible: label "Collision gap (likely)", value "{gapLikely} weeks",
+     sub "No free line capacity · Escalate", red border.
    - collides: label "Collision gap (likely)", value "{gapLikely} weeks",
      sub "Range {gapBest}–{gapWorst} wk (best–worst) · {severity}", red border.
-   - Watch: value "0 weeks", sub "Worst case {gapWorst} wk · Watch", amber border.
+   - Watch: value "{gapLikely} weeks", sub "Worst case {gapWorst} wk · Watch", amber border.
    - None: label "Collision gap", value "None", sub "Supply arrives in time, even in the worst case", green.
 2. Time left to act
-   - collides and latestOrderWeek > 0: value "{latestOrderWeek} weeks",
-     sub "Order by week +{latestOrderWeek} to close the gap · flagged {erpFlagWeek} wk before ERP",
-     border red if latestOrderWeek <= 2 else amber.
+   (check in this order)
+   - !capacityFeasible: value "Blocked", sub "Release line capacity first", red.
+   - collides and !bufferClosesGap: value "Too late for buffer",
+     sub "Buffer ordered now still {gapWithBuffer} wk late · escalate", red.
    - collides and latestOrderWeek == 0: value "This week",
-     sub "Order now to close the gap · flagged {erpFlagWeek} wk before ERP", red.
-   - collides and latestOrderWeek < 0: value "Overdue",
-     sub "A buffer alone can't close the gap · flagged {erpFlagWeek} wk before ERP", red.
+     sub "Order now to close the gap · assumes ERP flags at wk +{erpFlagWeek}", red.
+   - collides: value "{latestOrderWeek} weeks",
+     sub "Order by week +{latestOrderWeek} to close the gap · assumes ERP flags at wk +{erpFlagWeek}",
+     border red if latestOrderWeek <= 2 else amber.
    - otherwise: value "n/a", sub "No delay to act on", grey.
 3. Sales opportunity
    - isNewProject: value "~{relays} relays", sub "New project before tender · tender ~wk +{tenderExpectedWeek}"
@@ -154,19 +166,21 @@ TIMELINE CHART (Recharts, ~380px)
   "Supply at normal lead time" = ramp(baseLeadTime), grey dotted 2px;
   only if collides: "Supply if buffer ordered now" = ramp(arrivalIfBuffer), green dashed 2.5px.
   Legend on top, tooltip on hover.
-- Shading: if collides, light green band 0..erpFlagWeek labelled "Early-warning window · {erpFlagWeek} wk";
+- Shading: if collides, light green band 0..erpFlagWeek labelled "Early-warning window · {erpFlagWeek} wk (assumed)";
   if gapLikely > 0, light red band partsNeededWeek..arrivalLikely labelled "Gap · {gapLikely} wk".
 - Arrival range: if arrivalWorst > arrivalBest, an orange horizontal bracket at ~84% height from
   arrivalBest to arrivalWorst with a dot at arrivalLikely, label "Arrival range wk {best}–{worst}".
 - Dashed vertical markers with small labels near the bottom: "Today" (0), "ERP would flag"
   (erpFlagWeek, only if collides), "On site" (needWeek).
 STATUS BANNER
-- collides (red): "Collision detected ({severity lowercase}). {part} likely arrives at week +{arrivalLikely}
+- !capacityFeasible (red): "No free line capacity (escalate). The assembly line is fully committed, so no
+  valid schedule exists for {relays} relays. Release capacity before committing a delivery date."
+- otherwise collides (red): "Collision detected ({severity lowercase}). {part} likely arrives at week +{arrivalLikely}
   (range {arrivalBest}–{arrivalWorst}), but parts are needed in the factory by week +{partsNeededWeek} to reach
-  site at week +{needWeek}. Today's process would surface this around week +{erpFlagWeek}. " +
-  (latestOrderWeek >= 0
+  site at week +{needWeek}. Assumption: today's process would surface this around week +{erpFlagWeek}. " +
+  (bufferClosesGap
     ? "If the buffer is ordered now, parts arrive by week +{arrivalIfBuffer} and the gap closes."
-    : "Even a buffer ordered now arrives at week +{arrivalIfBuffer}, after the need date: escalate.")
+    : "Even a buffer ordered now arrives at week +{arrivalIfBuffer}, {gapWithBuffer} weeks after the need date: escalate.")
 - Watch (amber): "Watch. Likely supply is on time, but the worst case (week +{arrivalWorst}) misses the
   factory need date (week +{partsNeededWeek})."
 - None (green): "No collision. Even the worst case (week +{arrivalWorst}) arrives before parts are needed
@@ -186,23 +200,38 @@ DECISION CARDS (rule-generated, in this order; each shows role pill, title, acti
    +{arrivalWorst}; parts needed by week +{partsNeededWeek}." · Rule "Worst case = baseline lead time +
    worst-case supplier delay." · +7 days. (No further cards.)
 3. If collides:
-   a. Sourcing Lead · "Secure component buffer" · "Place a buffer order for {parts} units of {part} before
-      supplier allocation tightens." · Why "Source: {source}. Gap {gapBest}–{gapWorst} weeks (likely
+   a. Sourcing Lead · "Secure component buffer" · (bufferClosesGap
+      ? "Place a buffer order for {parts} units of {part} " + (latestOrderWeek <= 0 ? "this week" :
+        "by week +{latestOrderWeek}") + ", before supplier allocation tightens. This closes the likely gap."
+      : "Place a buffer order for {parts} units of {part} this week. It reduces the likely gap from
+        {gapLikely} to {gapWithBuffer} weeks but does not close it.") · Why "Source: {source}. Gap {gapBest}–{gapWorst} weeks (likely
       {gapLikely})." + (policyDelay > 0 ? " Includes +{policyDelay} wk from a trade signal." : "") ·
-      Rule "Parts = relays × parts per relay. If ordered now, arrival week +{arrivalIfBuffer} (illustrative:
-      ordering before allocation tightens avoids the supplier delay)." · +2 days.
-   b. Vaasa Plant Scheduler · "Re-sequence assembly start" · "Reserve {relays} assembly slots from week
-      +{max(1, partsNeededWeek)}, conditional on the buffer order. Without it, earliest start is week
+      Rule "Parts = relays × parts per relay. If ordered now, arrival week +{arrivalIfBuffer} (assumption:
+      ordering before allocation tightens avoids the supplier delay; parts needed by week +{partsNeededWeek})."
+      · +2 days.
+   b. If !capacityFeasible: Vaasa Plant Manager (red pill) · "Release line capacity" · "No free assembly
+      capacity: the line is fully committed. Decide which orders to move before {relays} relays for this
+      project can be scheduled." · Why "Free capacity = 0 relays/week." · Rule "Free capacity = line
+      capacity × (1 − committed share)." · +3 days.
+      Otherwise: Vaasa Plant Scheduler · "Re-sequence assembly start" · "Reserve {relays} assembly slots from week
+      +{max(1, bufferClosesGap ? partsNeededWeek : arrivalIfBuffer)}, conditional on the buffer order. Without it, earliest start is week
       +{arrivalLikely}." · Why "{relays} relays on {freeCap}/week free capacity = {assemblyWeeks} assembly
       week(s), about {round(relays / lineCapacity * 100)}% of one week's total line." · Rule "Free capacity =
       line capacity × (1 − committed share)." · +7 days.
-   c. Sales Operations · "Set the delivery promise" · "If the buffer is approved: quote standard lead time
-      and use delivery reliability as a differentiator in the tender. If not: quote {gapLikely} weeks later
-      for configurations using {part}." · Why "Without action, likely supply arrives {gapLikely} weeks after
-      parts are needed." · Rule "Need date = on-site date − test/delivery buffer − assembly weeks." · +7 days.
-   d. Only if Escalate: Supply Chain Manager (red pill) · "Escalate and start alternate-source qualification" ·
-      "Gap exceeds a buffer-only fix. Escalate allocation with the supplier and start qualification of an
-      alternate source for {part} as a longer-term action." · Why "Likely gap {gapLikely} weeks. Supply
+   c. Sales Operations · "Set the delivery promise" · text by case (never advise a standard quote unless
+      the buffer closes the gap):
+      - !capacityFeasible: "Do not commit a delivery date until line capacity is released. Share an
+        indicative window only."
+      - bufferClosesGap: "If the buffer is approved and placed in time: quote standard lead time. If not:
+        quote {gapLikely} weeks later for configurations using {part}."
+      - else: "A buffer alone does not close the gap. Quote at least {gapWithBuffer} weeks later with the
+        buffer, or {gapLikely} weeks later without it, until escalation secures supply."
+      Why "Without action, likely supply arrives {gapLikely} weeks after parts are needed. With a buffer
+      ordered now: {gapWithBuffer} weeks." · Rule "Need date = on-site date − test/delivery buffer − assembly weeks." · +7 days.
+   d. Only if gapLikely > 8: Supply Chain Manager (red pill) · "Escalate and start alternate-source
+      qualification" · "Likely gap is above 8 weeks. " + (bufferClosesGap ? "" : "A buffer alone does not
+      close it. ") + "Escalate allocation with the supplier and start qualification of an alternate source
+      for {part} as a longer-term action." · Why "Likely gap {gapLikely} weeks. Supply
       concentration: {concentration}." · Rule "Escalate when the likely gap exceeds 8 weeks (editable rule)."
       · +3 days.
 If no cards: green panel "No decisions required. Cards appear for new projects (sales) and when a supply
@@ -222,11 +251,12 @@ Empty state "No decisions recorded yet." CSV export.
 FORMULA PANEL (monospace chips with live values)
 Relays = {mw} MW × {relaysPerMW} × (1 + {stressPct}%) = {relays}
 Parts = {relays} × {partsPerRelay} = {parts}
-Assembly = {relays} ÷ {freeCap} free/wk = {assemblyWeeks} wk
+Assembly = {relays} ÷ {freeCap} free/wk = {capacityFeasible ? assemblyWeeks + " wk" : "no valid schedule"}
 Parts needed by = {needWeek} − {testDeliveryWeeks} − {assemblyWeeks} = week +{partsNeededWeek}
 Arrival = {baseLeadTime} + delay ({best}/{likely}/{worst}) + {policyDelay} policy = week +{aB}/{aL}/{aW}
 Gap (best/likely/worst) = {gB}/{gL}/{gW} wk
 Time left to act = {partsNeededWeek} − ({baseLeadTime} + {policyDelay}) = {latestOrderWeek} wk
+  (append " (negative: a buffer alone is too late)" when !bufferClosesGap)
 Muted note: "The language model only structures signal text. All quantities and dates come from these rules."
 
 ACCEPTANCE TESTS (default assumptions; the app must show exactly these values)
@@ -235,4 +265,12 @@ A 50%: relays 45, parts 360, assembly 3, needed by 20, gap 4/8/12, Act, time lef
 B 0%:  relays 90, parts 720, assembly 5, needed by 16, gap 8/12/16, Escalate, time left 2 weeks, 5 cards
 B 50%: relays 135, parts 1080, assembly 7, needed by 14, gap 10/14/18, Escalate, time left "This week", 5 cards
 C 0%:  relays 10, parts 80, assembly 1, needed by 30, gap 0/0/0, None, time left n/a, 0 cards
+Edge cases (Scenario A unless stated):
+- supplier delay best/likely/worst 2/6/10: gaps 0/1/5, severity Act (NOT Watch), KPI "1 weeks", 4 cards
+- supplier delay 3/7/11: gaps 0/2/6, severity Act, KPI "2 weeks"
+- supplier delay 0/4/8: gaps 0/0/3, severity Watch, KPI "0 weeks", 2 cards
+- committed 100%: freeCap 0, likely gap 5, Escalate, KPI sub "No free line capacity", time left "Blocked",
+  cards include "Release line capacity" and NOT "Re-sequence assembly start"
+- Scenario B with policyDelay 2 at 50% stress: buffer arrives week 16, needed by 14, time left
+  "Too late for buffer", delivery card does NOT say "quote standard lead time"
 ```
