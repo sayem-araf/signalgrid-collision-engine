@@ -82,7 +82,12 @@ def run():
     print(f"   Unmitigated Arrival: Week {analysis.unmitigated_arrival_week}")
     print(f"   Collision Gap:       {analysis.collision_gap_weeks} weeks likely (range {analysis.gap_best_weeks}-{analysis.gap_worst_weeks})")
     print(f"   Severity:            {analysis.severity}")
-    print(f"   Time Left to Act:    {analysis.latest_order_week} weeks")
+    if not analysis.capacity_feasible:
+        print("   Time Left to Act:    Blocked (no free line capacity)")
+    elif not analysis.buffer_closes_gap:
+        print(f"   Time Left to Act:    Too late for buffer (still {analysis.gap_with_buffer_weeks} wk late)")
+    else:
+        print(f"   Time Left to Act:    {max(0, analysis.latest_order_week)} weeks")
     print(f"   Has Collision:       {analysis.has_collision}")
 
     # 3. Generate Prescriptive Action Cards

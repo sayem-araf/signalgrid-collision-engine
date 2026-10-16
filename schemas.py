@@ -31,7 +31,7 @@ class BOMConfig:
     committed_capacity_share: float = 0.85    # share of capacity already committed
     test_delivery_buffer_weeks: int = 3       # test + delivery after assembly
     baseline_lead_time_weeks: int = 14        # normal component lead time
-    erp_detection_week: int = 14              # week a delay normally shows in ERP
+    erp_detection_week: int = 14              # ASSUMPTION: week a delay normally shows in ERP today
     demand_stress: float = 0.0                # 0.3 = demand 30% above permit estimate
 
 
@@ -45,7 +45,7 @@ class CollisionAnalysis:
     unmitigated_arrival_week: int             # likely arrival
     collision_gap_weeks: int                  # likely gap
     has_collision: bool
-    early_warning_weeks_gained: int
+    early_warning_weeks_gained: int           # equals erp_detection_week (assumed), not measured
     critical_part: str
     market_tightness: str
     source_citation: str
@@ -63,6 +63,10 @@ class CollisionAnalysis:
     tender_expected_week: Optional[int] = None
     arrival_if_buffer_week: int = 0           # buffer ordered now, before allocation tightens
     latest_order_week: int = 0                # last week to order the buffer and still close the gap
+    gap_with_buffer_weeks: int = 0            # gap remaining if the buffer is ordered now
+    buffer_closes_gap: bool = True            # False: a buffer alone is not enough
+    capacity_feasible: bool = True            # False: no free line capacity, no valid schedule
+    severity_reason: str = ""
 
 
 @dataclass

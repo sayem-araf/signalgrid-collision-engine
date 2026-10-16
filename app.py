@@ -105,68 +105,7 @@ if "decisions" not in st.session_state:
     st.session_state.decisions = {}
 
 # ----------------- SCENARIOS (all illustrative) -----------------
-SCENARIOS = {
-    "A · Hyperscale data center": {
-        "signals": [
-            {"type": "Demand", "severity": "High", "age": "1 day ago",
-             "title": "Grid connection permit for 60 MW data center (Phase 1)",
-             "body": "Zoning and high-voltage connection approved in an industrial area near the plant. "
-                     "Energisation expected in about 6 months.",
-             "source": "Municipal planning notice (illustrative)"},
-            {"type": "Supply", "severity": "High", "age": "3 days ago",
-             "title": "Packaging lead times extend 8–16 weeks for precision ADCs",
-             "body": "Semiconductor packaging capacity tight for high-reliability multichannel ADCs. "
-                     "Likely extension 12 weeks.",
-             "source": "OSAT lead-time bulletin (illustrative)"},
-            {"type": "Policy", "severity": "Medium", "age": "5 days ago",
-             "title": "Tariff on imported semiconductor raw materials",
-             "body": "Adds about 2 weeks for parts packaged in a single region (customs and re-routing).",
-             "source": "Trade notice (illustrative)"},
-        ],
-        "event": dict(project="Hyperscale data center, Phase 1 (illustrative)", mw=60.0, need_week=26,
-                      delay_weeks=12, delay_best_weeks=8, delay_worst_weeks=16, policy_delay_weeks=2,
-                      critical_part="16-bit multichannel ADC",
-                      market_tightness="Distributor stock declining (illustrative)",
-                      source="Planning notice + OSAT bulletin + trade notice (illustrative)",
-                      supply_concentration="Single region", is_new_project=True, tender_expected_week=6),
-    },
-    "B · Offshore wind substation": {
-        "signals": [
-            {"type": "Demand", "severity": "High", "age": "5 days ago",
-             "title": "180 MW offshore wind connection enters TSO queue",
-             "body": "Environmental permit finalised. Substation equipment needed in about 5.5 months.",
-             "source": "TSO connection queue (illustrative)"},
-            {"type": "Supply", "severity": "High", "age": "1 week ago",
-             "title": "Optical transceiver lead times extend 10–18 weeks",
-             "body": "Supplier factory maintenance reduces output of optical Ethernet transceivers. "
-                     "Likely extension 14 weeks.",
-             "source": "Component market report (illustrative)"},
-        ],
-        "event": dict(project="Offshore wind substation (illustrative)", mw=180.0, need_week=24,
-                      delay_weeks=14, delay_best_weeks=10, delay_worst_weeks=18, policy_delay_weeks=0,
-                      critical_part="Optical Ethernet transceiver",
-                      market_tightness="Franchised channel stock declining (illustrative)",
-                      source="TSO queue entry + market report (illustrative)",
-                      supply_concentration="Few regions", is_new_project=True, tender_expected_week=4),
-    },
-    "C · Routine demand, no disruption": {
-        "signals": [
-            {"type": "Demand", "severity": "Low", "age": "Planned",
-             "title": "Routine substation maintenance programme",
-             "body": "Regular feeder and breaker maintenance across the region. Covered by the current plan.",
-             "source": "Internal planning schedule (illustrative)"},
-            {"type": "Supply", "severity": "Low", "age": "Today",
-             "title": "Standard lead times on approved vendor list",
-             "body": "No unusual movement in lead times or distributor stock.",
-             "source": "Supplier confirmations (illustrative)"},
-        ],
-        "event": dict(project="Routine substation maintenance (illustrative)", mw=20.0, need_week=34,
-                      delay_weeks=0, delay_best_weeks=0, delay_worst_weeks=2, policy_delay_weeks=0,
-                      critical_part="Standard logic ICs", market_tightness="Normal replenishment",
-                      source="Internal planning schedule (illustrative)", supply_concentration="Diversified",
-                      is_new_project=False),
-    },
-}
+from scenarios import SCENARIOS
 
 SEV_PILL = {"High": "pill-high", "Medium": "pill-med", "Low": "pill-low"}
 TYPE_PILL = {"Demand": "pill-demand", "Supply": "pill-supply", "Policy": "pill-policy"}
@@ -179,11 +118,12 @@ with st.sidebar:
                               help="Demo proxy. In a pilot, relay count comes from bay/feeder count in tender documents.")
     parts_per_relay = st.slider("Critical parts per relay", 1, 16, 8, 1)
     weekly_capacity = st.slider("Assembly line capacity (relays/week)", 50, 300, 140, 10)
-    committed_pct = st.slider("Capacity already committed (%)", 50, 95, 85, 5)
+    committed_pct = st.slider("Capacity already committed (%)", 50, 100, 85, 5)
     buffer_wk = st.slider("Test + delivery after assembly (weeks)", 1, 8, 3, 1)
     baseline_lt = st.slider("Normal component lead time (weeks)", 6, 26, 14, 1)
-    erp_detection_week = st.slider("Week a delay normally shows in ERP", 6, 24, 14, 1,
-                                   help="When a purchase order misses its confirmed date.")
+    erp_detection_week = st.slider("Assumed week a delay shows in ERP today", 6, 24, 14, 1,
+                                   help="Assumption, not measured: when a purchase order would miss its "
+                                        "confirmed date in today's process. Used only for comparison.")
     st.divider()
     if st.button("Reset demo", use_container_width=True):
         st.session_state.audit_log = []
@@ -243,26 +183,32 @@ def kpi(col, label, value, sub, accent):
     )
 
 k1, k2, k3, k4 = st.columns(4)
-if collides:
+# The KPI always shows the engine's likely gap; the severity label never overrides the number.
+erp_note = f"assumes ERP flags at wk +{erp_detection_week}"
+if not a.capacity_feasible:
+    kpi(k1, "Collision gap (likely)", f"{a.collision_gap_weeks} weeks",
+        "No free line capacity · Escalate", CRIT)
+elif collides:
     kpi(k1, "Collision gap (likely)", f"{a.collision_gap_weeks} weeks",
         f"Range {a.gap_best_weeks}–{a.gap_worst_weeks} wk (best–worst) · {a.severity}", CRIT)
 elif a.severity == "Watch":
-    kpi(k1, "Collision gap (likely)", "0 weeks", f"Worst case {a.gap_worst_weeks} wk · Watch", WARN)
+    kpi(k1, "Collision gap (likely)", f"{a.collision_gap_weeks} weeks",
+        f"Worst case {a.gap_worst_weeks} wk · Watch", WARN)
 else:
     kpi(k1, "Collision gap", "None", "Supply arrives in time, even in the worst case", GOOD)
 latest_order_week = a.latest_order_week   # last week to order the buffer and still close the gap
 stress_note = f" · +{stress_pct}% stress" if stress_pct else ""
-if collides:
-    if latest_order_week == 0:
-        kpi(k2, "Time left to act", "This week",
-            f"Order now to close the gap · flagged {erp_detection_week} wk before ERP", CRIT)
-    elif latest_order_week > 0:
-        kpi(k2, "Time left to act", f"{latest_order_week} weeks",
-            f"Order by week +{latest_order_week} to close the gap · flagged {erp_detection_week} wk before ERP",
-            CRIT if latest_order_week <= 2 else WARN)
-    else:
-        kpi(k2, "Time left to act", "Overdue",
-            f"A buffer alone can't close the gap · flagged {erp_detection_week} wk before ERP", CRIT)
+if not a.capacity_feasible:
+    kpi(k2, "Time left to act", "Blocked", "Release line capacity first", CRIT)
+elif collides and not a.buffer_closes_gap:
+    kpi(k2, "Time left to act", "Too late for buffer",
+        f"Buffer ordered now still {a.gap_with_buffer_weeks} wk late · escalate", CRIT)
+elif collides and latest_order_week == 0:
+    kpi(k2, "Time left to act", "This week", f"Order now to close the gap · {erp_note}", CRIT)
+elif collides:
+    kpi(k2, "Time left to act", f"{latest_order_week} weeks",
+        f"Order by week +{latest_order_week} to close the gap · {erp_note}",
+        CRIT if latest_order_week <= 2 else WARN)
 else:
     kpi(k2, "Time left to act", "n/a", "No delay to act on", MUTED)
 if a.is_new_project:
@@ -331,7 +277,7 @@ with right:
 
     if collides:
         fig.add_vrect(x0=0, x1=erp_detection_week, fillcolor="rgba(12,163,12,0.07)", line_width=0, layer="below")
-        fig.add_annotation(x=erp_detection_week / 2, y=ymax * 0.96, text=f"Early-warning window · {erp_detection_week} wk",
+        fig.add_annotation(x=erp_detection_week / 2, y=ymax * 0.96, text=f"Early-warning window · {erp_detection_week} wk (assumed)",
                            showarrow=False, font=dict(color="#0a6e0a", size=12))
     # best-likely-worst arrival range, drawn as a bracket near the top
     if a.arrival_worst_week > a.arrival_best_week:
@@ -388,15 +334,22 @@ with right:
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    if collides:
+    if not a.capacity_feasible:
+        st.markdown(
+            f'<div class="sg-banner crit"><b>No free line capacity (escalate).</b> The assembly line is fully '
+            f'committed, so no valid schedule exists for {a.relays_needed} relays. Release capacity before '
+            f'committing a delivery date.</div>',
+            unsafe_allow_html=True)
+    elif collides:
         st.markdown(
             f'<div class="sg-banner crit"><b>Collision detected ({a.severity.lower()}).</b> {a.critical_part} likely arrives '
             f'at week +{a.unmitigated_arrival_week} (range {a.arrival_best_week}–{a.arrival_worst_week}), but parts are '
             f'needed in the factory by week +{a.component_need_week} to reach site at week +{a.need_week}. '
-            f'Today\'s process would surface this around week +{erp_detection_week}. '
+            f'Assumption: today\'s process would surface this around week +{erp_detection_week}. '
             + (f'If the buffer is ordered now, parts arrive by week +{a.arrival_if_buffer_week} and the gap closes.</div>'
-              if a.latest_order_week >= 0 else
-              f'Even a buffer ordered now arrives at week +{a.arrival_if_buffer_week}, after the need date: escalate.</div>'),
+              if a.buffer_closes_gap else
+              f'Even a buffer ordered now arrives at week +{a.arrival_if_buffer_week}, '
+              f'{a.gap_with_buffer_weeks} weeks after the need date: escalate.</div>'),
             unsafe_allow_html=True)
     elif a.severity == "Watch":
         st.markdown(
@@ -481,11 +434,11 @@ with c_method:
 <div class="sg-formula">
 Relays = <code>{a.mw:.0f} MW × {relays_per_mw} × (1 + {stress_pct}%)</code> = <b>{a.relays_needed}</b><br>
 Parts = <code>{a.relays_needed} × {parts_per_relay}</code> = <b>{a.components_needed:,}</b><br>
-Assembly = <code>{a.relays_needed} ÷ {a.free_capacity_per_week} free/wk</code> = <b>{a.assembly_weeks} wk</b><br>
+Assembly = <code>{a.relays_needed} ÷ {a.free_capacity_per_week} free/wk</code> = <b>{a.assembly_weeks if a.capacity_feasible else "no valid schedule"}{" wk" if a.capacity_feasible else ""}</b><br>
 Parts needed by = <code>{a.need_week} − {buffer_wk} − {a.assembly_weeks}</code> = week <b>+{a.component_need_week}</b><br>
 Arrival = <code>{baseline_lt} + delay ({event.delay_best_weeks}/{event.delay_weeks}/{event.delay_worst_weeks}) + {a.policy_delay_weeks} policy</code> = week <b>+{a.arrival_best_week}/{a.unmitigated_arrival_week}/{a.arrival_worst_week}</b><br>
 Gap (best/likely/worst) = <b>{a.gap_best_weeks}/{a.collision_gap_weeks}/{a.gap_worst_weeks} wk</b><br>
-Time left to act = <code>{a.component_need_week} − ({baseline_lt} + {a.policy_delay_weeks})</code> = <b>{a.latest_order_week} wk</b><br>
+Time left to act = <code>{a.component_need_week} − ({baseline_lt} + {a.policy_delay_weeks})</code> = <b>{a.latest_order_week} wk</b>{" (negative: a buffer alone is too late)" if not a.buffer_closes_gap else ""}<br>
 <span style="color:{MUTED}">The language model only structures signal text. All quantities and dates come from these rules.</span>
 </div>
 """,
