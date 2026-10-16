@@ -1,0 +1,15 @@
+{
+  "project": "Offshore wind substation (illustrative)",
+  "mw": 180.0,
+  "need_week": 24,
+  "delay_weeks": 14,
+  "delay_best_weeks": 10,
+  "delay_worst_weeks": 18,
+  "policy_delay_weeks": 0,
+  "critical_part": "Optical Ethernet transceiver",
+  "market_tightness": "Franchised channel stock declining (illustrative)",
+  "source": "TSO connection queue + component market report (illustrative)",
+  "supply_concentration": "Few regions",
+  "is_new_project": true,
+  "tender_expected_week": 4
+}

@@ -1,0 +1,15 @@
+{
+  "project": "Hyperscale data center, Phase 1 (illustrative)",
+  "mw": 60.0,
+  "need_week": 26,
+  "delay_weeks": 12,
+  "delay_best_weeks": 8,
+  "delay_worst_weeks": 16,
+  "policy_delay_weeks": 2,
+  "critical_part": "16-bit multichannel ADC",
+  "market_tightness": "Distributor stock declining (illustrative)",
+  "source": "Municipal planning notice + OSAT lead-time bulletin + trade notice (illustrative)",
+  "supply_concentration": "Single region",
+  "is_new_project": true,
+  "tender_expected_week": 6
+}

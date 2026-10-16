@@ -1,0 +1,4 @@
+# Dependencies used by the Streamlit dashboard in app.py
+streamlit
+pandas
+plotly
