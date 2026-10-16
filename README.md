@@ -1,68 +1,125 @@
-# SignalGrid collision engine
+# SignalGrid Collision Engine
 
-Early warning for component lead time collisions in protection relay planning. Project signals go in; a deterministic engine checks whether critical parts will arrive before they are needed, and turns the result into recommended decisions that a person approves.
+Decision support for component lead time risk in protection relay production planning.
 
-This repository is the maintained version of the prototype first built at the Junction x Vaasa Hackathon for the ABB Distribution Solutions challenge. The hackathon submission is kept unchanged at [signalgrid-ai-agent](https://github.com/sayem-araf/signalgrid-ai-agent). All data is illustrative.
+SignalGrid estimates when the critical components for a new electrification project must be in the factory, compares that date with expected supplier arrival, and recommends actions for sales, sourcing and production. Every figure is produced by explicit rules, and every action requires human approval.
 
-## What it does
+> **Demonstration data only.** All projects, quantities, capacities and lead times in this repository are illustrative.
 
-1. **Signal extraction** (`agents/extractor.py`). The only language model step. It turns demand, supply and policy text into fixed fields. Without `ANTHROPIC_API_KEY` it loads a cached fixture and says so.
-2. **Collision engine** (`core/engine.py`). Closed form rules, no learning:
-   - Relays = MW × relays per MW × (1 + demand stress)
-   - Parts = relays × parts per relay
-   - Free capacity = line capacity × (1 − committed share); assembly weeks = relays ÷ free capacity
-   - Parts needed by = on site week − test and delivery − assembly weeks
-   - Arrival (best, likely, worst) = lead time + supplier delay range + policy delay
-   - Gap = arrival − parts needed week
-   - Buffer check: does a buffer ordered now (lead time + policy) arrive by the parts needed week?
-3. **Decisions** (`agents/orchestrator.py`). Cards for sales, sourcing, production and sales operations. A card only recommends a standard delivery quote when the engine confirms the buffer closes the gap.
-4. **Decision log**. Approvals and rejections are recorded in the session and exported as CSV. Nothing is written to ERP.
+## Overview
 
-### Severity rules
+| Stage | Module | Description |
+|---|---|---|
+| Signal extraction | `agents/extractor.py` | Converts demand, supply and policy notices into a structured event. Uses a language model when an API key is configured, otherwise loads cached fixtures. |
+| Collision engine | `core/engine.py` | Deterministic calculation of demand, assembly capacity, need date, arrival range, gap and severity. |
+| Recommendations | `agents/orchestrator.py` | Role based action cards, scaled to severity. |
+| Dashboard | `app.py` | Streamlit interface with scenarios, editable assumptions, timeline and decision log. |
 
-| Severity | Rule |
-|---|---|
-| None | On time even in the worst case |
-| Watch | Likely on time (gap 0), worst case late |
-| Act | Likely gap 1 to 8 weeks |
-| Escalate | Likely gap above 8 weeks, or no free line capacity |
+The system is read only. Decisions are recorded in the session and can be exported as CSV; nothing is written to ERP or CRM systems.
 
-## Run
+## Calculation
 
-```bash
-pip install -r requirements-dev.txt
-streamlit run app.py        # dashboard
-python3 rundemo.py          # command line run, standard library only
-python3 -m pytest           # tests
+```
+relays             = MW × relays_per_MW × (1 + demand_stress)
+parts              = relays × parts_per_relay
+free_capacity      = line_capacity × (1 − committed_share)
+assembly_weeks     = ceil(relays / free_capacity)
+parts_needed_week  = on_site_week − test_and_delivery_weeks − assembly_weeks
+arrival_week       = lead_time + supplier_delay + policy_delay        (best, likely, worst)
+gap                = max(0, arrival_week − parts_needed_week)
+buffer_arrival     = lead_time + policy_delay
+latest_order_week  = parts_needed_week − buffer_arrival
 ```
 
-## Tests
-
-`tests/` covers the scenario values shared with the Lovable demo, severity boundaries (gaps of 0, 1, 2, 3, 8 and 9 weeks), zero free capacity, a buffer that arrives too late, and a sweep of about 570 parameter combinations checking that no decision card contradicts the engine. A Streamlit AppTest run checks that the KPI row shows the engine's numbers.
-
-## Changes since the hackathon
-
-An independent code review found four issues. All are fixed and covered by tests.
-
-| Issue | Fix |
+| Severity | Condition |
 |---|---|
-| A likely gap of 1 to 2 weeks was classed as Watch and shown as 0 weeks | Watch now means likely gap 0. Any positive likely gap is Act or Escalate, and the KPI always shows the engine's number |
-| Zero free capacity was treated as one relay per week | No free capacity is reported as infeasible and escalated to the plant; no assembly slots are proposed |
-| The delivery card advised a standard quote even when a buffer would arrive too late | The engine checks whether the buffer closes the gap; cards and the KPI say so when it does not |
-| The ERP comparison week read like a measured result | Labelled as an assumption throughout |
+| None | Parts arrive in time, including the worst case |
+| Watch | Likely gap is 0, worst case is late |
+| Act | Likely gap of 1 to 8 weeks |
+| Escalate | Likely gap above 8 weeks, or no free line capacity |
 
-The engine also rejects inconsistent inputs (a supplier delay range where best > likely or likely > worst, negative MW or policy delay). Scenarios now live in `scenarios.py`, shared by the dashboard and tests. `LOVABLE_UPDATE.md` carries the same fixes to the Lovable demo.
+A standard delivery quote is recommended only when a buffer ordered now arrives by the parts needed week.
 
-## Limitations
+## Getting started
 
-This prototype demonstrates a method, not verified business impact.
+Requires Python 3.10 or later.
 
-- All signals and planning values are illustrative. There is no ERP connection, automated signal collection or SQL reporting layer.
-- Relays per MW is a proxy. In practice the count comes from bay and feeder numbers in tender documents.
-- The buffer rule assumes that ordering now avoids the supplier allocation delay. This needs validation against supplier history.
-- Each project is evaluated on its own. Several projects sharing the same line capacity could overload it together.
-- The ERP detection week is an input assumption used for comparison, not a measured early warning gain.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+streamlit run app.py
+```
 
-## Credits
+`python rundemo.py` runs the full pipeline from the command line using only the standard library.
 
-Policy signals, uncertainty ranges and the demand stress test are adapted from Ardeshir Zohrabi's conceptual market model.
+Optional environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Enables live signal extraction |
+| `ANTHROPIC_MODEL` | Overrides the default extraction model |
+
+## Testing
+
+```bash
+python -m pytest
+```
+
+The suite covers:
+
+- reference values for the three demonstration scenarios
+- severity boundaries at gaps of 0, 1, 2, 3, 8 and 9 weeks
+- zero free line capacity and a buffer that arrives too late
+- rejection of inconsistent inputs
+- a parameter sweep confirming that no recommendation contradicts the engine
+- a Streamlit AppTest run confirming that the dashboard shows the engine's values
+
+## Project structure
+
+```
+agents/
+  extractor.py          signal extraction
+  orchestrator.py       recommendations and decision log entries
+core/
+  engine.py             collision engine
+fixtures/               cached extraction output
+tests/                  pytest suite
+app.py                  Streamlit dashboard
+scenarios.py            demonstration scenarios
+schemas.py              data structures
+rundemo.py              command line run
+LOVABLE_PROMPT.md       specification for the web demo
+LOVABLE_UPDATE.md       change specification for the existing web demo
+```
+
+## Assumptions and limitations
+
+- Relays per MW is a proxy. In practice the relay count comes from bay and feeder numbers in tender documents.
+- The buffer rule assumes that ordering early avoids the supplier allocation delay. This requires validation against supplier delivery history.
+- Projects are evaluated individually. Several projects drawing on the same line capacity are not yet assessed together.
+- The ERP detection week is an input assumption used for comparison, not a measured result.
+- There is no live connection to ERP, procurement or supplier data.
+
+## Changelog
+
+**1.1.0**
+
+- Watch is limited to a likely gap of 0; any positive likely gap is classed as Act or Escalate, and the dashboard always shows the calculated gap.
+- Zero free line capacity is reported as infeasible and escalated, instead of being treated as one relay per week.
+- Delivery recommendations check whether a buffer closes the gap before advising a standard quote.
+- The ERP detection week is labelled as an assumption.
+- Input validation for supplier delay ranges and negative values.
+- Test suite added.
+
+**1.0.0**
+
+Initial prototype, built at the Junction x Vaasa Hackathon 2026 for the ABB Distribution Solutions challenge. The original submission is available at [signalgrid-ai-agent](https://github.com/sayem-araf/signalgrid-ai-agent).
+
+## Acknowledgements
+
+Policy signals, uncertainty ranges and the demand stress test are adapted from a conceptual market model by Ardeshir Zohrabi.
+
+## License
+
+Released under the MIT License. See [LICENSE](LICENSE).
