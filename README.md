@@ -6,6 +6,8 @@ SignalGrid estimates when the critical components for a new electrification proj
 
 > **Demonstration data only.** All projects, quantities, capacities and lead times in this repository are illustrative.
 
+![Dashboard overview: KPIs, incoming signals and collision timeline](docs/images/dashboard-overview.png)
+
 ## Overview
 
 | Stage | Module | Description |
@@ -39,6 +41,8 @@ latest_order_week  = parts_needed_week − buffer_arrival
 | Escalate | Likely gap above 8 weeks, or no free line capacity |
 
 A standard delivery quote is recommended only when a buffer ordered now arrives by the parts needed week.
+
+![Recommended decisions for sales, sourcing, production and sales operations](docs/images/decision-cards.png)
 
 ## Getting started
 
@@ -83,6 +87,7 @@ agents/
   orchestrator.py       recommendations and decision log entries
 core/
   engine.py             collision engine
+docs/images/            README screenshots
 fixtures/               cached extraction output
 tests/                  pytest suite
 app.py                  Streamlit dashboard
